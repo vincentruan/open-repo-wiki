@@ -6,24 +6,55 @@
 <div class="bg-white min-h-screen flex flex-col">
     <div class="flex-1 flex flex-col justify-center items-center">
         <div class="w-full max-w-2xl px-4 sm:px-6 lg:px-8">
-            <div class="text-center mb-12">
+            <div class="text-center mb-8">
                 <h1 class="text-4xl font-bold tracking-tight text-black sm:text-5xl mb-4">
                     Open Repo Wiki
                 </h1>
                 <p class="text-xl text-gray-500">
-                    Generate documentation for any GitHub repository instantly.
+                    Generate documentation for any repository instantly.
                 </p>
+            </div>
+            
+            <!-- Source Type Tabs -->
+            <div class="flex justify-center mb-6">
+                <div class="inline-flex rounded-lg border border-gray-200 p-1 bg-gray-50">
+                    <button type="button" id="tab-github" class="source-tab px-4 py-2 text-sm font-medium rounded-md bg-black text-white" data-source="github">
+                        <i class="fab fa-github mr-2"></i>GitHub
+                    </button>
+                    <button type="button" id="tab-local" class="source-tab px-4 py-2 text-sm font-medium rounded-md text-gray-600 hover:text-black" data-source="local">
+                        <i class="fas fa-folder mr-2"></i>Local Folder
+                    </button>
+                    <button type="button" id="tab-git" class="source-tab px-4 py-2 text-sm font-medium rounded-md text-gray-600 hover:text-black" data-source="git">
+                        <i class="fas fa-code-branch mr-2"></i>Git URL
+                    </button>
+                </div>
             </div>
             
             <div class="w-full relative">
                 <form action="{% url 'search' %}" method="get" class="relative" id="search-form">
+                    <input type="hidden" name="source_type" id="source-type-input" value="github">
                     <div class="relative flex items-center">
-                        <input type="text" name="q" id="search-input" class="w-full rounded-full border-gray-300 py-4 pl-6 pr-16 text-lg border outline-none focus:border-black focus:ring-0" placeholder="Enter GitHub repository (e.g., daeisbae/open-repo-wiki)" style="box-shadow: 0 0 15px rgba(0,0,0,0.1);">
-                        <button type="submit" id="search-btn" disabled class="absolute right-2 w-10 h-10 flex items-center justify-center rounded-full bg-gray-300 text-white cursor-not-allowed transition-colors">
+                        <input type="text" name="q" id="search-input" 
+                               class="w-full rounded-full border-gray-300 py-4 pl-6 pr-16 text-lg border outline-none focus:border-black focus:ring-0" 
+                               placeholder="Enter GitHub repository (e.g., owner/repo)" 
+                               style="box-shadow: 0 0 15px rgba(0,0,0,0.1);">
+                        <button type="submit" id="search-btn" disabled 
+                                class="absolute right-2 w-10 h-10 flex items-center justify-center rounded-full bg-gray-300 text-white cursor-not-allowed transition-colors">
                             <i class="fas fa-arrow-up"></i>
                         </button>
                     </div>
                 </form>
+                
+                <!-- Help text for each source type -->
+                <div id="help-github" class="source-help mt-3 text-center text-sm text-gray-500">
+                    Enter <code class="bg-gray-100 px-1 rounded">owner/repo</code> or full GitHub URL
+                </div>
+                <div id="help-local" class="source-help mt-3 text-center text-sm text-gray-500 hidden">
+                    Enter absolute path (e.g., <code class="bg-gray-100 px-1 rounded">/home/user/project</code>)
+                </div>
+                <div id="help-git" class="source-help mt-3 text-center text-sm text-gray-500 hidden">
+                    Enter any Git URL (GitLab, Bitbucket, self-hosted, etc.)
+                </div>
                 
                 {% if error %}
                 <div class="absolute left-0 right-0 mt-4 rounded-md bg-red-50 p-4 border border-red-100">
@@ -52,9 +83,76 @@
 <script>
     const input = document.getElementById('search-input');
     const btn = document.getElementById('search-btn');
+    const sourceTypeInput = document.getElementById('source-type-input');
+    const tabs = document.querySelectorAll('.source-tab');
+    const helpTexts = document.querySelectorAll('.source-help');
     
+    const placeholders = {
+        'github': 'Enter GitHub repository (e.g., owner/repo)',
+        'local': 'Enter absolute path (e.g., /home/user/project)',
+        'git': 'Enter Git URL (e.g., https://gitlab.com/owner/repo)'
+    };
+    
+    // Tab switching
+    tabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+            const sourceType = this.dataset.source;
+            
+            // Update active tab style
+            tabs.forEach(t => {
+                t.classList.remove('bg-black', 'text-white');
+                t.classList.add('text-gray-600');
+            });
+            this.classList.add('bg-black', 'text-white');
+            this.classList.remove('text-gray-600');
+            
+            // Update hidden input
+            sourceTypeInput.value = sourceType;
+            
+            // Update placeholder
+            input.placeholder = placeholders[sourceType];
+            
+            // Update help text
+            helpTexts.forEach(h => h.classList.add('hidden'));
+            document.getElementById('help-' + sourceType).classList.remove('hidden');
+            
+            // Clear input and reset button
+            input.value = '';
+            updateButton();
+        });
+    });
+    
+    // Auto-detect source type from input
     input.addEventListener('input', function() {
-        if (this.value.trim().length > 0) {
+        const value = this.value.trim();
+        
+        // Auto-detect and switch tab if clear pattern
+        if (value.startsWith('/') || value.startsWith('~') || /^[A-Z]:\\/.test(value)) {
+            // Local path detected
+            if (sourceTypeInput.value !== 'local') {
+                document.getElementById('tab-local').click();
+                this.value = value; // Restore value after tab switch
+            }
+        } else if (value.includes('gitlab.com') || value.includes('bitbucket.org') || 
+                   (value.includes('.git') && !value.includes('github.com'))) {
+            // Git URL detected
+            if (sourceTypeInput.value !== 'git') {
+                document.getElementById('tab-git').click();
+                this.value = value;
+            }
+        } else if (value.includes('github.com') || /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(value)) {
+            // GitHub detected
+            if (sourceTypeInput.value !== 'github') {
+                document.getElementById('tab-github').click();
+                this.value = value;
+            }
+        }
+        
+        updateButton();
+    });
+    
+    function updateButton() {
+        if (input.value.trim().length > 0) {
             btn.disabled = false;
             btn.classList.remove('bg-gray-300', 'cursor-not-allowed');
             btn.classList.add('bg-black', 'hover:bg-gray-800', 'cursor-pointer');
@@ -63,6 +161,7 @@
             btn.classList.add('bg-gray-300', 'cursor-not-allowed');
             btn.classList.remove('bg-black', 'hover:bg-gray-800', 'cursor-pointer');
         }
-    });
+    }
 </script>
 {% endblock %}
+

@@ -3,7 +3,7 @@ from django.http import StreamingHttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .tasks import process_repository_task
+from .tasks import run_repository_task
 from .models import Repository, Branch, Folder, File
 import time
 import json
@@ -52,32 +52,33 @@ def index(request):
 
 def search(request):
     query = request.GET.get('q', '').strip()
+    source_type = request.GET.get('source_type', '').strip()
+    
     if not query:
         return redirect('index')
     
-    # Normalize input
-    # Remove trailing slash and .git
-    query = query.rstrip('/')
-    if query.endswith('.git'):
-        query = query[:-4]
-
-    # Extract owner/repo
-    if 'github.com/' in query:
-        # Works for https://github.com/owner/repo and github.com/owner/repo
-        path = query.split('github.com/')[-1]
-        parts = path.split('/')
+    # Import here to avoid circular imports
+    from .utils import detect_source_type
+    
+    # Detect source type
+    detected_type, parsed_info = detect_source_type(query, source_type if source_type else None)
+    
+    if detected_type == 'unknown':
+        error_msg = parsed_info.get('error', 'Invalid input format')
+        return render(request, 'index.html', {'error': error_msg})
+    
+    if detected_type == 'github':
+        return _handle_github_source(request, parsed_info['owner'], parsed_info['repo'])
+    elif detected_type == 'local':
+        return _handle_local_source(request, parsed_info['path'])
+    elif detected_type == 'git':
+        return _handle_git_source(request, parsed_info['url'])
     else:
-        parts = query.split('/')
+        return render(request, 'index.html', {'error': 'Unsupported source type'})
 
-    # Filter out empty strings
-    parts = [p for p in parts if p]
 
-    if len(parts) < 2:
-         return render(request, 'index.html', {'error': 'Invalid format. Please use owner/repo or a GitHub URL'})
-    
-    owner = parts[0]
-    repo = parts[1]
-    
+def _handle_github_source(request, owner: str, repo: str):
+    """Handle GitHub repository source."""
     # Check if exists
     if Repository.objects.filter(owner=owner, repo=repo).exists():
         return redirect('repo_detail', owner=owner, repo=repo)
@@ -91,17 +92,116 @@ def search(request):
         process_status='Queued'
     )
 
-    # Trigger task
-    task = process_repository_task.delay(owner, repo)
+    # Trigger task (async or sync depending on Celery availability)
+    result = run_repository_task(owner, repo, source_type='github')
     
     return render(request, 'processing.html', {
         'owner': owner,
         'repo': repo,
-        'task_id': task.id
+        'task_id': result.get('task_id'),
+        'sync_mode': result['mode'] == 'sync'
+    })
+
+
+def _handle_local_source(request, path: str):
+    """Handle local folder source."""
+    import os
+    import hashlib
+    
+    # Validate path exists
+    if not os.path.exists(path):
+        return render(request, 'index.html', {'error': f'Path does not exist: {path}'})
+    
+    if not os.path.isdir(path):
+        return render(request, 'index.html', {'error': f'Path is not a directory: {path}'})
+    
+    # Generate owner/repo from path
+    folder_name = os.path.basename(path.rstrip('/'))
+    local_url = f"local://{path}"
+    
+    # First, check if this exact path was scanned before
+    existing_by_url = Repository.objects.filter(url=local_url).first()
+    if existing_by_url:
+        return redirect('repo_detail', owner=existing_by_url.owner, repo=existing_by_url.repo)
+    
+    # Generate unique repo name based on path hash to avoid conflicts
+    path_hash = hashlib.md5(path.encode()).hexdigest()[:8]
+    owner = 'local'
+    repo = f"{folder_name}_{path_hash}"
+    
+    # Create placeholder
+    Repository.objects.create(
+        url=local_url,
+        owner=owner,
+        repo=repo,
+        default_branch='main',
+        process_status='Queued'
+    )
+
+    # Trigger task
+    result = run_repository_task(owner, repo, source_type='local', source_path=path)
+    
+    return render(request, 'processing.html', {
+        'owner': owner,
+        'repo': repo,
+        'task_id': result.get('task_id'),
+        'sync_mode': result['mode'] == 'sync'
+    })
+
+
+def _handle_git_source(request, url: str):
+    """Handle generic Git URL source."""
+    import re
+    import hashlib
+    
+    # Extract repo name from URL
+    # Examples: https://gitlab.com/owner/repo, git@gitlab.com:owner/repo.git
+    url_clean = url.rstrip('/').rstrip('.git')
+    
+    # Try to extract owner/repo from URL
+    match = re.search(r'[:/]([^/:]+)/([^/:]+)(?:\.git)?$', url_clean)
+    if match:
+        owner = match.group(1)
+        repo = match.group(2)
+    else:
+        # Fallback: use hash of URL
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+        owner = 'git'
+        repo = f"repo_{url_hash}"
+    
+    # Check if exists
+    existing = Repository.objects.filter(owner=owner, repo=repo).first()
+    if existing:
+        if existing.url == url:
+            return redirect('repo_detail', owner=owner, repo=repo)
+        # Different URL, make unique
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+        repo = f"{repo}_{url_hash}"
+    
+    # Create placeholder
+    Repository.objects.create(
+        url=url,
+        owner=owner,
+        repo=repo,
+        default_branch='main',
+        process_status='Queued'
+    )
+
+    # Trigger task
+    result = run_repository_task(owner, repo, source_type='git', source_path=url)
+    
+    return render(request, 'processing.html', {
+        'owner': owner,
+        'repo': repo,
+        'task_id': result.get('task_id'),
+        'sync_mode': result['mode'] == 'sync'
     })
 
 def repo_detail(request, owner, repo):
-    repository = get_object_or_404(Repository, owner=owner, repo=repo)
+    from django.http import Http404
+    repository = Repository.objects.filter(owner=owner, repo=repo).first()
+    if not repository:
+        raise Http404("Repository not found")
     
     # Get the latest branch
     branch = _get_latest_branch(repository)
@@ -203,7 +303,10 @@ def repo_status_stream(request, owner, repo):
                 # Force fresh read from DB (avoid cached results)
                 from django.db import connection
                 connection.close()
-                repository = Repository.objects.get(owner=owner, repo=repo)
+                # Use filter().first() to handle potential duplicates gracefully
+                repository = Repository.objects.filter(owner=owner, repo=repo).first()
+                if not repository:
+                    raise Repository.DoesNotExist()
                 branch = _get_latest_branch(repository)
                 
                 if _is_repo_complete(repository, branch):
@@ -269,10 +372,11 @@ class RepositoryQueueView(APIView):
         if Repository.objects.filter(owner=owner, repo=repo).exists():
              return Response({"success": False, "message": "Item already in database"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Trigger task
-        task = process_repository_task.delay(owner, repo)
+        # Trigger task (async or sync depending on Celery availability)
+        result = run_repository_task(owner, repo)
         return Response({
             "success": True,
             "message": f"Repository {owner}/{repo} added to queue",
-            "task_id": task.id
+            "task_id": result.get('task_id'),
+            "mode": result['mode']
         }, status=status.HTTP_201_CREATED)

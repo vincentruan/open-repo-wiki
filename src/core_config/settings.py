@@ -69,22 +69,48 @@ ASGI_APPLICATION = 'core_config.asgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
+DB_ENGINE = env('DB_ENGINE', default='postgres')
 DB_HOST = env('DB_HOST', default='localhost')
-DB_PORT = env('DB_PORT', default='5432')
 DB_NAME = env('DB_NAME', default='postgres')
 DB_USER = env('DB_USER', default='postgres')
 DB_PASSWORD = env('DB_PASSWORD', default='postgres')
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': DB_NAME,
-        'USER': DB_USER,
-        'PASSWORD': DB_PASSWORD,
-        'HOST': DB_HOST,
-        'PORT': DB_PORT,
+# Configure database engine based on DB_ENGINE setting
+if DB_ENGINE == 'mysql':
+    # Use pymysql as a drop-in replacement for mysqlclient
+    try:
+        import pymysql
+        pymysql.install_as_MySQLdb()
+    except ImportError:
+        pass  # mysqlclient may be available instead (e.g., in Docker)
+    DB_PORT = env('DB_PORT', default='3306')
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': DB_NAME,
+            'USER': DB_USER,
+            'PASSWORD': DB_PASSWORD,
+            'HOST': DB_HOST,
+            'PORT': DB_PORT,
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            },
+        }
     }
-}
+else:
+    # Default to PostgreSQL
+    DB_PORT = env('DB_PORT', default='5432')
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': DB_NAME,
+            'USER': DB_USER,
+            'PASSWORD': DB_PASSWORD,
+            'HOST': DB_HOST,
+            'PORT': DB_PORT,
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators

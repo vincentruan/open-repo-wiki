@@ -6,10 +6,13 @@ pydantic
 openai
 python-dotenv
 aiohttp
+aiofiles
 boto3
 asyncpg
 loguru
 psycopg[binary]
+mysqlclient; sys_platform == 'linux'
+pymysql
 django
 djangorestframework
 celery

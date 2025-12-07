@@ -8,7 +8,8 @@ from django.db import transaction
 from agent.index import CodeProcessor, FolderProcessor
 from agent.dependency_parser import DependencyParser
 from wiki_app.models import Repository, Branch, Folder, File, Topic
-from github.fetch_repo import fetch_github_repo_details, fetch_github_repo_tree, RepoTreeResult, fetch_github_repo_file
+from github.fetch_repo import RepoTreeResult
+from github.provider import RepoProvider, get_repo_provider
 from github.filterfile import whitelisted_file, blacklisted_file, whitelisted_filter, blacklisted_files, \
     blacklisted_folder, blacklisted_filter
 from llm.llm_provider import LLMProvider
@@ -25,15 +26,17 @@ from loguru import logger
 MAX_FILES_ALLOWED = 600
 
 class InsertRepoService:
-    def __init__(self, llm_provider: LLMProvider):
+    def __init__(self, llm_provider: LLMProvider, repo_provider: Optional[RepoProvider] = None):
         # Note: This service is instantiated per task, so it is not a singleton.
         # However, we use a semaphore to limit concurrent requests to GitHub/LLM to avoid rate limits.
         self.codeProcessor = CodeProcessor(llm_provider)
         self.folderProcessor = FolderProcessor(llm_provider)
         self.folderPathMap: Dict[str, int] = {}
         self.repoFileInfo: Optional[Dict[str, str]] = None
-        self.semaphore = asyncio.Semaphore(20)  # Limit concurrent GitHub requests
+        self.semaphore = asyncio.Semaphore(20)  # Limit concurrent repo requests
         self.dependencyParser = DependencyParser()
+        # Use provided repo_provider or get from factory
+        self.repo_provider = repo_provider if repo_provider else get_repo_provider()
 
     async def insertRepository(self, owner: str, repo: str):
         # Track processing start
@@ -61,7 +64,7 @@ class InsertRepoService:
             # Step 1: Fetch repo details
             step_start = time.time()
             await update_status(f"Step 1: Fetching repository details for {owner}/{repo}...")
-            repo_details = await fetch_github_repo_details(owner, repo)
+            repo_details = await self.repo_provider.get_details(owner, repo)
             STEP_DURATION.labels(step='fetch_details').observe(time.time() - step_start)
             STEP_COMPLETED.labels(step='fetch_details', status='success').inc()
             GITHUB_API_CALLS_TOTAL.labels(endpoint='repo_details', status='success').inc()
@@ -123,7 +126,7 @@ class InsertRepoService:
             # Step 4: Fetch repo tree
             step_start = time.time()
             await update_status(f"Step 4: Fetching entire repo tree for {owner}/{repo} @ {repo_details.sha}...")
-            fullTree = await fetch_github_repo_tree(owner, repo, repo_details.sha)
+            fullTree = await self.repo_provider.get_tree(owner, repo, repo_details.sha)
             STEP_DURATION.labels(step='fetch_tree').observe(time.time() - step_start)
             STEP_COMPLETED.labels(step='fetch_tree', status='success').inc()
             GITHUB_API_CALLS_TOTAL.labels(endpoint='repo_tree', status='success').inc()
@@ -265,7 +268,7 @@ class InsertRepoService:
                 
             async with self.semaphore:
                 try:
-                    content = await fetch_github_repo_file(
+                    content = await self.repo_provider.get_file_content(
                         self.repoFileInfo["repo_owner"],
                         self.repoFileInfo["repo_name"],
                         self.repoFileInfo["commit_sha"],
