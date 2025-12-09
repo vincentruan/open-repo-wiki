@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import aiohttp
 
-from github.fetch_repo import (
+from src.github.fetch_repo import (
     RepoDetails, RepoTreeResult,
     fetch_github_repo_details, fetch_github_repo_tree, fetch_github_repo_file
 )

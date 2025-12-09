@@ -3,7 +3,8 @@ from pathlib import Path
 import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
+# BASE_DIR points to the project root (parent of src/)
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 env = environ.Env()
 # Read .env file if it exists (useful for local dev, Docker might inject env vars directly)
@@ -29,7 +30,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'wiki_app',
+    'src.wiki_app',
     'django_prometheus',
 ]
 
@@ -45,12 +46,12 @@ MIDDLEWARE = [
     'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
 
-ROOT_URLCONF = 'core_config.urls'
+ROOT_URLCONF = 'src.core_config.urls'
 
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],
+        'DIRS': [BASE_DIR / 'src' / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -63,8 +64,8 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'core_config.wsgi.application'
-ASGI_APPLICATION = 'core_config.asgi.application'
+WSGI_APPLICATION = 'src.core_config.wsgi.application'
+ASGI_APPLICATION = 'src.core_config.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases

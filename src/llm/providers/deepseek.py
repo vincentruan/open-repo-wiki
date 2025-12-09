@@ -1,7 +1,7 @@
 from typing import List, Optional
 
-from llm.llm_config import LLMConfig
-from llm.llm_provider import LLMProvider, HistoryItem
+from src.llm.llm_config import LLMConfig
+from src.llm.llm_provider import LLMProvider, HistoryItem
 
 from openai import AsyncOpenAI
 

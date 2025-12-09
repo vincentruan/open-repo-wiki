@@ -1,7 +1,7 @@
-from llm.llm_config import LLMConfig
-from llm.llm_provider import LLMProvider
-from llm.providers.deepseek import DeepSeekProvider
-from llm.providers.openrouter import OpenRouterProvider
+from src.llm.llm_config import LLMConfig
+from src.llm.llm_provider import LLMProvider
+from src.llm.providers.deepseek import DeepSeekProvider
+from src.llm.providers.openrouter import OpenRouterProvider
 
 import os
 import dotenv

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from db.utils.connector import AsyncDBConnector
+from src.db.utils.connector import AsyncDBConnector
 
 class FolderData:
     def __init__(

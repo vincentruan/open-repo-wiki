@@ -231,6 +231,9 @@ erDiagram
         string default_branch
         integer stars
         integer forks
+        string process_status "Processing status message"
+        datetime process_start_at "When processing started"
+        datetime queued_at "When queued for processing"
     }
 
     Topics {
@@ -238,8 +241,8 @@ erDiagram
     }
 
     RepositoryTopics {
-	    string repository_url FK "References Repository"
-	    string topic_name FK "References Topics"
+        string repository_url FK "References Repository"
+        string topic_name FK "References Topics"
     }
 
     Branch {
@@ -247,28 +250,30 @@ erDiagram
         string last_commit_sha
         string name
         string repository_url FK "References Repository"
-        string commit_at
-        string created_at
-        string ai_summary
+        datetime commit_at
+        datetime created_at
+        text ai_summary
     }
 
     Folder {
         integer folder_id PK
         string name
-        string path
-        integer parent_folder_id FK "References Folder"
-        string ai_summary
-        string dependency_graph "Mermaid diagram of file relationships"
+        text path
+        integer parent_folder_id FK "References Folder (nullable)"
+        text ai_summary
+        text usage "Usage description"
+        text dependency_graph "Mermaid diagram of file relationships"
         integer branch_id FK "References Branch"
     }
 
     File {
-		    integer file_id PK
+        integer file_id PK
         string name
         string language
         integer folder_id FK "References Folder"
-        string content
-        string ai_summary
+        text content
+        text ai_summary
+        text usage "Usage description"
         json dependencies "List of imported modules"
     }
 
@@ -279,3 +284,33 @@ erDiagram
     Folder ||--o{ Folder : has_parent
     Folder ||--|{ File : contains
 ```
+
+## 4.1 Table Descriptions
+
+### Repository
+
+Stores metadata about analyzed repositories. The `process_status` field tracks the current processing state for SSE status streaming.
+
+### Branch
+
+Represents a specific branch/commit of a repository. The `ai_summary` contains the LLM-generated overview of the entire repository.
+
+### Folder
+
+Hierarchical folder structure within a branch. Key fields:
+
+- `ai_summary`: LLM-generated summary of the folder's purpose
+- `usage`: Brief description of how this folder is used
+- `dependency_graph`: Mermaid diagram showing relationships between files
+
+### File
+
+Individual code files with their content and analysis:
+
+- `ai_summary`: LLM-generated explanation of the file
+- `usage`: Brief description of the file's role
+- `dependencies`: JSON array of imported modules/files
+
+### Topics & RepositoryTopics
+
+Many-to-many relationship for GitHub repository topics/tags.

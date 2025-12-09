@@ -13,16 +13,26 @@ The project also includes a monitoring stack with Prometheus and Grafana, which 
 The project uses Docker for local development. To build and run the project:
 
 1.  **Configure the environment:**
-    *   Copy the `.env.example` file to `.env`.
+    *   Copy the `.env.local.example` file to `.env` in the project root.
     *   Edit the `.env` file to include your GitHub token and LLM provider configuration.
 
 2.  **Start the services:**
     *   Run the following command to build and start the Docker containers:
         ```bash
-        docker-compose up
+        docker compose up
         ```
 
 This will start the Django application, a PostgreSQL database, a Redis instance, and a Celery worker. The application will be available at `http://localhost:8000`.
+
+For local development without Docker:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.local.example .env
+python manage.py migrate
+python manage.py runserver
+```
 
 ## Development Conventions
 

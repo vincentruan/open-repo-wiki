@@ -3,7 +3,7 @@ from typing import Optional
 
 import boto3
 
-from db.config.config import DBConfig
+from src.db.config.config import DBConfig
 import asyncpg
 from loguru import logger
 

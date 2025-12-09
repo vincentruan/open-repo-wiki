@@ -3,8 +3,8 @@ import os
 import asyncio
 from unittest.mock import MagicMock, AsyncMock
 
-# Add src directory to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add project root directory to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Mock Django setup
 import django
@@ -13,7 +13,7 @@ from django.conf import settings
 if not settings.configured:
     settings.configure(
         INSTALLED_APPS=[
-            'wiki_app',
+            'src.wiki_app',
         ],
         DATABASES={
             'default': {
@@ -24,8 +24,8 @@ if not settings.configured:
     )
     django.setup()
 
-from wiki_app.services import InsertRepoService
-from github.fetch_repo import RepoTreeResult
+from src.wiki_app.services import InsertRepoService
+from src.github.fetch_repo import RepoTreeResult
 
 async def test_summarize_folders():
     print("Testing _summarizeFolders...")

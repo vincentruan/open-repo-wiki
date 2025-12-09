@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 
-from llm.llm_config import LLMConfig
+from src.llm.llm_config import LLMConfig
 
 
 @dataclass

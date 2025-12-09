@@ -1,10 +1,10 @@
 import sys
 import os
 
-# Add src directory to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add project root directory to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from agent.code_splitter import CodeSplitter
+from src.agent.code_splitter import CodeSplitter
 
 def test_code_splitter_overlap_drift():
     # Create a code string with known lines

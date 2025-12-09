@@ -1,16 +1,16 @@
 from typing import Optional, List
 
-from agent.prompt import CodePrompt, FolderPrompt
-from agent.schema_parser import SchemaParser
-from agent.schema_factory import FileSchema, FolderSchema
-from agent.prompt_generator import PromptGenerator, FilePromptTemplateVariables, PromptTemplateConfig, PromptType, \
+from src.agent.prompt import CodePrompt, FolderPrompt
+from src.agent.schema_parser import SchemaParser
+from src.agent.schema_factory import FileSchema, FolderSchema
+from src.agent.prompt_generator import PromptGenerator, FilePromptTemplateVariables, PromptTemplateConfig, PromptType, \
     RepoInfo, \
     FolderPromptTemplateVariables
-from agent.code_splitter import CodeSplitter
-from llm.llm_provider import LLMProvider
+from src.agent.code_splitter import CodeSplitter
+from src.llm.llm_provider import LLMProvider
 
 
-from agent.schema_factory import FileSchema, FolderSchema
+from src.agent.schema_factory import FileSchema, FolderSchema
 from pydantic import BaseModel
 from typing import Union
 

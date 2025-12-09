@@ -5,7 +5,7 @@ from datetime import datetime
 import aiohttp
 import asyncio
 
-from github.config import github_auth_config
+from src.github.config import github_auth_config
 
 
 @dataclass

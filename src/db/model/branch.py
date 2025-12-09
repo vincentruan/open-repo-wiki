@@ -1,5 +1,5 @@
 from typing import Optional
-from db.utils.connector import AsyncDBConnector
+from src.db.utils.connector import AsyncDBConnector
 
 class BranchData:
     def __init__(

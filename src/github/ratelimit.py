@@ -1,7 +1,7 @@
 from typing import Optional
 
 import aiohttp
-from github.config import github_auth_config
+from src.github.config import github_auth_config
 
 from loguru import logger
 

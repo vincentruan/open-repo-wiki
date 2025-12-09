@@ -96,10 +96,10 @@ services:
 
   app:
     build:
-      context: ./src
+      context: .
       dockerfile: Dockerfile
     restart: always
-    command: bash -c "python manage.py makemigrations wiki_app && python manage.py migrate && python manage.py create_superuser && python manage.py runserver 0.0.0.0:8000"
+    command: bash -c "python manage.py makemigrations src.wiki_app && python manage.py migrate && python manage.py create_superuser && python manage.py runserver 0.0.0.0:8000"
     environment:
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}
@@ -142,10 +142,10 @@ services:
 
   celery_worker:
     build:
-      context: ./src
+      context: .
       dockerfile: Dockerfile
     restart: always
-    command: celery -A core_config worker -l info
+    command: celery -A src.core_config worker -l info
     environment:
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}

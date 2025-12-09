@@ -5,17 +5,17 @@ from typing import Optional, List, Dict
 from asgiref.sync import sync_to_async
 from django.db import transaction
 
-from agent.index import CodeProcessor, FolderProcessor
-from agent.dependency_parser import DependencyParser
-from wiki_app.models import Repository, Branch, Folder, File, Topic
-from github.fetch_repo import RepoTreeResult
-from github.provider import RepoProvider, get_repo_provider
-from github.filterfile import whitelisted_file, blacklisted_file, whitelisted_filter, blacklisted_files, \
+from src.agent.index import CodeProcessor, FolderProcessor
+from src.agent.dependency_parser import DependencyParser
+from src.wiki_app.models import Repository, Branch, Folder, File, Topic
+from src.github.fetch_repo import RepoTreeResult
+from src.github.provider import RepoProvider, get_repo_provider
+from src.github.filterfile import whitelisted_file, blacklisted_file, whitelisted_filter, blacklisted_files, \
     blacklisted_folder, blacklisted_filter
-from llm.llm_provider import LLMProvider
-from wiki_app.config import TokenProcessingConfig
-from wiki_app.allowed_languages import ALLOWED_LANGUAGES
-from wiki_app.metrics import (
+from src.llm.llm_provider import LLMProvider
+from src.wiki_app.config import TokenProcessingConfig
+from src.wiki_app.allowed_languages import ALLOWED_LANGUAGES
+from src.wiki_app.metrics import (
     REPO_SUMMARIZATIONS_TOTAL, REPO_PROCESSING_DURATION, STEP_DURATION, STEP_COMPLETED,
     FILES_PROCESSED_TOTAL, FILE_SUMMARIZATION_DURATION, FOLDERS_PROCESSED_TOTAL,
     FOLDER_SUMMARIZATION_DURATION, GITHUB_API_CALLS_TOTAL, GITHUB_API_DURATION,

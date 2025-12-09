@@ -5,8 +5,8 @@ from typing import Optional
 
 from .services import InsertRepoService
 from .utils import is_celery_available
-from llm.llm_factory import LLMFactory
-from llm.llm_config import LLMConfig
+from src.llm.llm_factory import LLMFactory
+from src.llm.llm_config import LLMConfig
 
 
 def _execute_repository_processing(
@@ -29,14 +29,21 @@ def _execute_repository_processing(
     
     # Create appropriate provider based on source type
     if source_type == 'local':
-        from github.local_provider import LocalRepoProvider
-        provider = LocalRepoProvider(source_path)
+        from src.github.local_provider import LocalRepoProvider
+        # Pass consistent identifiers to match the Repository record created by views.py
+        source_url = f"local://{source_path}"
+        provider = LocalRepoProvider(
+            source_path,
+            source_url=source_url,
+            owner=owner,
+            repo=repo
+        )
     elif source_type == 'git':
-        from github.git_provider import GitRepoProvider
+        from src.github.git_provider import GitRepoProvider
         provider = GitRepoProvider(source_path)
     else:
         # Default to GitHub
-        from github.provider import GitHubRepoProvider
+        from src.github.provider import GitHubRepoProvider
         provider = GitHubRepoProvider()
     
     service = InsertRepoService(

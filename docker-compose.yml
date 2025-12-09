@@ -27,16 +27,16 @@ services:
       - app-network
 
   app:
-    build: ./src
+    build: .
     restart: always
-    command: bash -c "python manage.py makemigrations wiki_app && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    command: bash -c "python manage.py makemigrations src.wiki_app && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     develop:
       watch:
         - action: sync
-          path: ./src
+          path: .
           target: /app
         - action: rebuild
-          path: ./src/requirements.txt
+          path: ./requirements.txt
     environment:
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}
@@ -68,16 +68,16 @@ services:
       - app-network
 
   celery_worker:
-    build: ./src
+    build: .
     restart: always
-    command: celery -A core_config worker -l info
+    command: celery -A src.core_config worker -l info
     develop:
       watch:
         - action: sync+restart
-          path: ./src
+          path: .
           target: /app
         - action: rebuild
-          path: ./src/requirements.txt
+          path: ./requirements.txt
     environment:
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}

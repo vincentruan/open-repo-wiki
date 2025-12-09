@@ -3,15 +3,18 @@ Local Repository Provider for reading repository data from local file system.
 """
 import os
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
 from typing import Optional, List, Set
 
 import aiohttp
 import aiofiles
 
-from github.fetch_repo import RepoDetails, RepoTreeResult
+from src.github.fetch_repo import RepoDetails, RepoTreeResult
 
+# UTC+8 timezone (e.g., China Standard Time)
+UTC8 = timezone(timedelta(hours=8))
 
 # Directories and files to ignore when scanning local repositories
 DEFAULT_IGNORE_PATTERNS: Set[str] = {
@@ -63,18 +66,32 @@ DEFAULT_IGNORE_PATTERNS: Set[str] = {
 
 class LocalRepoProvider:
     """Repository provider that reads data from the local file system."""
-    
-    def __init__(self, base_path: str, ignore_patterns: Optional[Set[str]] = None):
+
+    def __init__(
+        self,
+        base_path: str,
+        ignore_patterns: Optional[Set[str]] = None,
+        source_url: Optional[str] = None,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None
+    ):
         """
         Initialize the local repository provider.
-        
+
         Args:
             base_path: The root directory of the local repository.
             ignore_patterns: Optional set of patterns to ignore (defaults to DEFAULT_IGNORE_PATTERNS).
+            source_url: Optional URL to use in RepoDetails (for consistency with view layer).
+            owner: Optional owner name to use in RepoDetails.
+            repo: Optional repo name to use in RepoDetails.
         """
         self.base_path = Path(base_path).resolve()
         self.ignore_patterns = ignore_patterns if ignore_patterns is not None else DEFAULT_IGNORE_PATTERNS
-        
+        # Store provided identifiers for consistent responses
+        self._source_url = source_url
+        self._owner = owner
+        self._repo = repo
+
         if not self.base_path.exists():
             raise ValueError(f"Local repository path does not exist: {self.base_path}")
         if not self.base_path.is_dir():
@@ -105,16 +122,20 @@ class LocalRepoProvider:
     async def get_details(self, owner: str, repo: str) -> RepoDetails:
         """
         Get repository details for a local repository.
-        
-        For local repos, owner/repo params are ignored; details are derived from the base_path.
+
+        Uses provided identifiers from __init__ if available, otherwise auto-generates.
+        This ensures consistency with the Repository record created by the view layer.
         """
-        repo_name = self.base_path.name
+        # Use provided identifiers if available, otherwise auto-generate
+        repo_name = self._repo if self._repo else self.base_path.name
+        repo_owner = self._owner if self._owner else "local"
+        url = self._source_url if self._source_url else f"local://{self.base_path}"
         sha = self._generate_sha()
-        
+
         return RepoDetails(
-            repo_owner="local",
+            repo_owner=repo_owner,
             repo_name=repo_name,
-            url=f"file://{self.base_path}",
+            url=url,
             topics=[],
             language=self._detect_language(),
             description=f"Local repository: {self.base_path}",
@@ -122,7 +143,7 @@ class LocalRepoProvider:
             forks=0,
             default_branch="local",
             sha=sha,
-            commit_at=datetime.now()
+            commit_at=datetime.now(UTC8)
         )
     
     def _detect_language(self) -> Optional[str]:

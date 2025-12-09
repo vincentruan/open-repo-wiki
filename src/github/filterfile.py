@@ -1,7 +1,7 @@
 import re
 from typing import List, Dict
 
-from github.fetch_repo import RepoTreeResult
+from src.github.fetch_repo import RepoTreeResult
 
 
 def whitelisted_file(files: List[str], regex_filter: List[str]) -> List[str]:

@@ -9,7 +9,7 @@ import asyncio
 
 from pydantic import BaseModel
 
-from agent.schema_factory import FolderSchema, FileSchema
+from src.agent.schema_factory import FolderSchema, FileSchema
 
 
 class SchemaParser:
