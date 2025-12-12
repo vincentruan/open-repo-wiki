@@ -1,12 +1,17 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .tasks import run_repository_task
 from .models import Repository, Branch, Folder, File
+from .progress import should_resume, ProgressEvent
 import time
 import json
+import os
+import hashlib
+import re
+from typing import Generator, Optional, Tuple, Dict, Any
 
 FILE_RETURN_LIMIT = 600
 
@@ -15,7 +20,8 @@ def _get_latest_branch(repository: Repository) -> Branch | None:
     Return the most recent branch for a repository.
     If none found, try to recover via folders/files.
     """
-    branch = repository.branches.order_by('-created_at').first()
+    # Type annotation to help Pylance understand the relationship
+    branch = repository.branches.order_by('-created_at').first()  # type: ignore
     if branch:
         return branch
 
@@ -251,8 +257,8 @@ def build_tree(branch, include_files=True):
         
     # Add files to folder nodes
     for f in files:
-        if f.folder_id in folder_nodes:
-            folder_nodes[f.folder_id]['children'].append({
+        if f.folder_id in folder_nodes:  # type: ignore
+            folder_nodes[f.folder_id]['children'].append({  # type: ignore
                 'type': 'file',
                 'obj': f
             })
@@ -261,8 +267,8 @@ def build_tree(branch, include_files=True):
     roots = []
     for f in folders:
         node = folder_nodes[f.folder_id]
-        if f.parent_folder_id:
-            parent = folder_nodes.get(f.parent_folder_id)
+        if f.parent_folder_id:  # type: ignore
+            parent = folder_nodes.get(f.parent_folder_id)  # type: ignore
             if parent:
                 parent['children'].append(node)
             else:
@@ -294,8 +300,7 @@ def build_tree(branch, include_files=True):
 def repo_status_stream(request, owner, repo):
     def event_stream():
         timeout_counter = 0
-        max_retries_for_creation = 30 # Wait 60 seconds for the repo to be created
-        last_message = None
+        max_retries_for_creation = 30  # Wait 60 seconds for the repo to be created
 
         while True:
             # Check if repository is processed
@@ -308,44 +313,64 @@ def repo_status_stream(request, owner, repo):
                 if not repository:
                     raise Repository.DoesNotExist()
                 branch = _get_latest_branch(repository)
-                
+
                 if _is_repo_complete(repository, branch):
                     # Send completion event
                     data = json.dumps({'status': 'complete'})
-                    yield f"data: {data}\n\n"
+                    yield f"data: {data}\n\n".encode('utf-8')
                     break
                 else:
-                    # Send processing event with status message and start time
+                    # Send processing event with enhanced progress information
                     status_msg = repository.process_status or "Processing..."
                     start_time = repository.process_start_at.isoformat() if repository.process_start_at else None
-                    
+
                     # Calculate queue position if status is 'Queued'
                     queue_pos = None
                     if status_msg == 'Queued':
                         queue_pos = Repository.objects.filter(
-                            process_status='Queued', 
+                            process_status='Queued',
                             queued_at__lt=repository.queued_at
                         ).count() + 1
 
-                    # Only send if message changed to reduce noise, or always send for timer sync
-                    data = json.dumps({
-                        'status': 'processing', 
+                    # Extract progress info from processing_state
+                    processing_state = repository.processing_state or {}
+                    file_progress = processing_state.get('file_progress', {})
+                    folder_progress = processing_state.get('folder_progress', {})
+
+                    event_data = {
+                        'status': 'processing',
                         'message': status_msg,
                         'start_time': start_time,
-                        'queue_pos': queue_pos
-                    })
-                    yield f"data: {data}\n\n"
+                        'queue_pos': queue_pos,
+                        'processing_status': repository.processing_status,
+                        'current_step': processing_state.get('current_step'),
+                        'resuming': processing_state.get('status') == 'in_progress' and bool(file_progress.get('completed', 0)),
+                        'progress': {
+                            'files': {
+                                'total': file_progress.get('total', 0),
+                                'completed': file_progress.get('completed', 0),
+                                'failed': file_progress.get('failed', 0)
+                            },
+                            'folders': {
+                                'total': folder_progress.get('total', 0),
+                                'completed': folder_progress.get('completed', 0)
+                            }
+                        }
+                    }
+
+                    data = json.dumps(event_data)
+                    yield f"data: {data}\n\n".encode('utf-8')
             except Repository.DoesNotExist:
                 if timeout_counter > max_retries_for_creation:
-                     data = json.dumps({'status': 'error', 'message': 'Repository initialization timed out or failed.'})
-                     yield f"data: {data}\n\n"
-                     break
+                    data = json.dumps({'status': 'error', 'message': 'Repository initialization timed out or failed.'})
+                    yield f"data: {data}\n\n".encode('utf-8')
+                    break
 
                 data = json.dumps({'status': 'processing', 'message': 'Initializing repository...'})
-                yield f"data: {data}\n\n"
+                yield f"data: {data}\n\n".encode('utf-8')
                 timeout_counter += 1
-            
-            time.sleep(1) # Check every 1 second for more responsive updates
+
+            time.sleep(1)  # Check every 1 second for more responsive updates
 
     response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'
@@ -367,7 +392,7 @@ class RepositoryQueueView(APIView):
         repo = request.data.get('repo')
         if not owner or not repo:
             return Response({"success": False, "message": "Owner and repo required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Check if exists
         if Repository.objects.filter(owner=owner, repo=repo).exists():
              return Response({"success": False, "message": "Item already in database"}, status=status.HTTP_400_BAD_REQUEST)
@@ -377,6 +402,286 @@ class RepositoryQueueView(APIView):
         return Response({
             "success": True,
             "message": f"Repository {owner}/{repo} added to queue",
+            "task_id": result.get('task_id'),
+            "mode": result['mode']
+        }, status=status.HTTP_201_CREATED)
+
+
+class RepositorySubmitView(APIView):
+    """
+    POST /api/repository/submit
+    Submit a repository for processing with support for resume and progress tracking.
+    """
+
+    def post(self, request):
+        source_type = request.data.get('source_type', '').strip()
+        source_url = request.data.get('source_url', '').strip()
+        force_restart = request.data.get('force_restart', False)
+
+        if not source_url:
+            return Response({
+                "success": False,
+                "message": "source_url is required"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Auto-detect source type if not provided
+        from .utils import detect_source_type
+        detected_type, parsed_info = detect_source_type(source_url, source_type if source_type else None)
+
+        if detected_type == 'unknown':
+            return Response({
+                "success": False,
+                "message": parsed_info.get('error', 'Invalid input format')
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Route to appropriate handler
+        if detected_type == 'github':
+            return self._handle_github(parsed_info['owner'], parsed_info['repo'], force_restart)
+        elif detected_type == 'local':
+            return self._handle_local(parsed_info['path'], force_restart)
+        elif detected_type == 'git':
+            return self._handle_git(parsed_info['url'], force_restart)
+        else:
+            return Response({
+                "success": False,
+                "message": "Unsupported source type"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    def _handle_github(self, owner: str, repo: str, force_restart: bool) -> Response:
+        """Handle GitHub repository submission."""
+        existing = Repository.objects.filter(owner=owner, repo=repo).first()
+
+        if existing:
+            # Check if we should resume or redirect
+            if should_resume(existing, force_restart):
+                result = run_repository_task(owner, repo, source_type='github')
+                return Response({
+                    "success": True,
+                    "owner": owner,
+                    "repo": repo,
+                    "status": "resuming",
+                    "message": f"Resuming processing for {owner}/{repo}",
+                    "task_id": result.get('task_id'),
+                    "mode": result['mode'],
+                    "processing_state": existing.processing_state
+                }, status=status.HTTP_200_OK)
+            elif existing.processing_status == 'completed':
+                return Response({
+                    "success": True,
+                    "owner": owner,
+                    "repo": repo,
+                    "status": "completed",
+                    "message": f"Repository {owner}/{repo} already processed",
+                    "redirect_url": f"/{owner}/{repo}/"
+                }, status=status.HTTP_200_OK)
+            elif existing.processing_status == 'in_progress':
+                return Response({
+                    "success": True,
+                    "owner": owner,
+                    "repo": repo,
+                    "status": "in_progress",
+                    "message": f"Repository {owner}/{repo} is currently being processed",
+                    "processing_state": existing.processing_state
+                }, status=status.HTTP_200_OK)
+            elif force_restart:
+                # Force restart - clear state and re-process
+                existing.processing_state = {}  # type: ignore
+                existing.processing_status = 'pending'
+                existing.process_status = 'Queued'
+                existing.save()
+
+        if not existing:
+            # Create new repository record
+            Repository.objects.create(
+                url=f"https://github.com/{owner}/{repo}",
+                owner=owner,
+                repo=repo,
+                default_branch='main',
+                process_status='Queued',
+                processing_status='pending'
+            )
+
+        # Trigger processing task
+        result = run_repository_task(owner, repo, source_type='github', force_restart=force_restart)
+
+        return Response({
+            "success": True,
+            "owner": owner,
+            "repo": repo,
+            "status": "queued",
+            "message": f"Repository {owner}/{repo} queued for processing",
+            "task_id": result.get('task_id'),
+            "mode": result['mode']
+        }, status=status.HTTP_201_CREATED)
+
+    def _handle_local(self, path: str, force_restart: bool) -> Response:
+        """Handle local folder submission."""
+        # Validate path exists
+        if not os.path.exists(path):
+            return Response({
+                "success": False,
+                "message": f"Path does not exist: {path}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not os.path.isdir(path):
+            return Response({
+                "success": False,
+                "message": f"Path is not a directory: {path}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Generate identifiers
+        folder_name = os.path.basename(path.rstrip('/'))
+        local_url = f"local://{path}"
+        path_hash = hashlib.md5(path.encode()).hexdigest()[:8]
+        owner = 'local'
+        repo = f"{folder_name}_{path_hash}"
+
+        # Check existing by URL
+        existing = Repository.objects.filter(url=local_url).first()
+
+        if existing:
+            if should_resume(existing, force_restart):
+                result = run_repository_task(existing.owner, existing.repo, source_type='local', source_path=path)
+                return Response({
+                    "success": True,
+                    "owner": existing.owner,
+                    "repo": existing.repo,
+                    "status": "resuming",
+                    "message": f"Resuming processing for {path}",
+                    "task_id": result.get('task_id'),
+                    "mode": result['mode'],
+                    "processing_state": existing.processing_state
+                }, status=status.HTTP_200_OK)
+            elif existing.processing_status == 'completed':
+                return Response({
+                    "success": True,
+                    "owner": existing.owner,
+                    "repo": existing.repo,
+                    "status": "completed",
+                    "message": f"Local folder {path} already processed",
+                    "redirect_url": f"/{existing.owner}/{existing.repo}/"
+                }, status=status.HTTP_200_OK)
+            elif existing.processing_status == 'in_progress':
+                return Response({
+                    "success": True,
+                    "owner": existing.owner,
+                    "repo": existing.repo,
+                    "status": "in_progress",
+                    "message": f"Local folder {path} is currently being processed",
+                    "processing_state": existing.processing_state
+                }, status=status.HTTP_200_OK)
+            elif force_restart:
+                existing.processing_state = {}  # type: ignore
+                existing.processing_status = 'pending'
+                existing.process_status = 'Queued'
+                existing.save()
+                owner = existing.owner
+                repo = existing.repo
+
+        if not existing:
+            Repository.objects.create(
+                url=local_url,
+                owner=owner,
+                repo=repo,
+                default_branch='main',
+                process_status='Queued',
+                processing_status='pending'
+            )
+
+        result = run_repository_task(owner, repo, source_type='local', source_path=path, force_restart=force_restart)
+
+        return Response({
+            "success": True,
+            "owner": owner,
+            "repo": repo,
+            "status": "queued",
+            "message": f"Local folder {path} queued for processing",
+            "task_id": result.get('task_id'),
+            "mode": result['mode']
+        }, status=status.HTTP_201_CREATED)
+
+    def _handle_git(self, url: str, force_restart: bool) -> Response:
+        """Handle generic Git URL submission."""
+        url_clean = url.rstrip('/').rstrip('.git')
+
+        # Extract owner/repo from URL
+        match = re.search(r'[:/]([^/:]+)/([^/:]+)(?:\.git)?$', url_clean)
+        if match:
+            owner = match.group(1)
+            repo = match.group(2)
+        else:
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+            owner = 'git'
+            repo = f"repo_{url_hash}"
+
+        # Check existing by URL
+        existing = Repository.objects.filter(url=url).first()
+        if not existing:
+            existing = Repository.objects.filter(owner=owner, repo=repo).first()
+
+        if existing:
+            if should_resume(existing, force_restart):
+                result = run_repository_task(existing.owner, existing.repo, source_type='git', source_path=url)
+                return Response({
+                    "success": True,
+                    "owner": existing.owner,
+                    "repo": existing.repo,
+                    "status": "resuming",
+                    "message": f"Resuming processing for {url}",
+                    "task_id": result.get('task_id'),
+                    "mode": result['mode'],
+                    "processing_state": existing.processing_state
+                }, status=status.HTTP_200_OK)
+            elif existing.processing_status == 'completed':
+                return Response({
+                    "success": True,
+                    "owner": existing.owner,
+                    "repo": existing.repo,
+                    "status": "completed",
+                    "message": f"Git repository {url} already processed",
+                    "redirect_url": f"/{existing.owner}/{existing.repo}/"
+                }, status=status.HTTP_200_OK)
+            elif existing.processing_status == 'in_progress':
+                return Response({
+                    "success": True,
+                    "owner": existing.owner,
+                    "repo": existing.repo,
+                    "status": "in_progress",
+                    "message": f"Git repository {url} is currently being processed",
+                    "processing_state": existing.processing_state
+                }, status=status.HTTP_200_OK)
+            elif force_restart:
+                existing.processing_state = {}  # type: ignore
+                existing.processing_status = 'pending'
+                existing.process_status = 'Queued'
+                existing.save()
+                owner = existing.owner
+                repo = existing.repo
+
+        if not existing:
+            # Handle potential conflict with different URL
+            check_existing = Repository.objects.filter(owner=owner, repo=repo).first()
+            if check_existing and check_existing.url != url:
+                url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+                repo = f"{repo}_{url_hash}"
+
+            Repository.objects.create(
+                url=url,
+                owner=owner,
+                repo=repo,
+                default_branch='main',
+                process_status='Queued',
+                processing_status='pending'
+            )
+
+        result = run_repository_task(owner, repo, source_type='git', source_path=url, force_restart=force_restart)
+
+        return Response({
+            "success": True,
+            "owner": owner,
+            "repo": repo,
+            "status": "queued",
+            "message": f"Git repository {url} queued for processing",
             "task_id": result.get('task_id'),
             "mode": result['mode']
         }, status=status.HTTP_201_CREATED)

@@ -7,4 +7,5 @@ urlpatterns = [
     path('<str:owner>/<str:repo>/', views.repo_detail, name='repo_detail'),
     path('api/status/<str:owner>/<str:repo>/', views.repo_status_stream, name='repo_status_stream'),
     path('api/repository', views.RepositoryQueueView.as_view(), name='repository_api'),
+    path('api/repository/submit', views.RepositorySubmitView.as_view(), name='repository_submit'),
 ]

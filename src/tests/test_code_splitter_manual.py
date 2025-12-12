@@ -21,7 +21,7 @@ def test_code_splitter_line_numbering():
     print("Result:")
     print(result)
     
-    if expected_output_part in result:
+    if result is not None and expected_output_part in result:
         print("\nSUCCESS: Line numbers are correctly prepended.")
     else:
         print("\nFAILURE: Line numbers are missing or incorrect.")

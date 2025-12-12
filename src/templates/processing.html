@@ -11,16 +11,53 @@
                 <p class="text-lg text-gray-500">
                     We are generating the wiki for this repository. This may take a few minutes.
                 </p>
-                
+
+                <!-- Resume indicator -->
+                <div id="resume-indicator" class="mt-4 hidden">
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                        <i class="fas fa-redo mr-2"></i>Resuming from checkpoint
+                    </span>
+                </div>
+
+                <!-- Progress bar -->
                 <div class="mt-8 relative pt-1">
-                    <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-gray-200">
-                        <div class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-black w-full animate-pulse"></div>
+                    <div class="overflow-hidden h-3 mb-2 text-xs flex rounded-full bg-gray-200">
+                        <div id="progress-bar"
+                             class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-black transition-all duration-300"
+                             style="width: 0%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500">
+                        <span id="progress-text">0%</span>
+                        <span id="progress-counts"></span>
                     </div>
                 </div>
-                
+
+                <!-- Current step -->
+                <div id="current-step" class="mt-4 text-sm font-medium text-gray-700"></div>
+
+                <!-- Status message -->
                 <p id="status-message" class="mt-2 text-sm text-gray-500">Initializing...</p>
-                <p id="queue-pos" class="mt-1 text-sm font-semibold text-black" style="display:none;"></p>
-                <p id="timer" class="mt-1 text-xs text-gray-400"></p>
+
+                <!-- Current item being processed -->
+                <p id="current-item" class="mt-1 text-xs text-gray-400 font-mono truncate max-w-md mx-auto"></p>
+
+                <!-- Queue position -->
+                <p id="queue-pos" class="mt-2 text-sm font-semibold text-black hidden"></p>
+
+                <!-- Timer -->
+                <p id="timer" class="mt-2 text-xs text-gray-400"></p>
+
+                <!-- File/folder stats -->
+                <div id="stats-container" class="mt-6 flex justify-center space-x-8 text-sm hidden">
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-black" id="files-completed">0</div>
+                        <div class="text-gray-500">Files</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-black" id="folders-completed">0</div>
+                        <div class="text-gray-500">Folders</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -30,27 +67,93 @@
     const owner = "{{ owner }}";
     const repo = "{{ repo }}";
     let startTime = null;
+    let eventSource = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 10;
+
+    const stepLabels = {
+        'fetch_details': 'Fetching repository details',
+        'insert_repo': 'Saving repository info',
+        'insert_branch': 'Saving branch info',
+        'fetch_tree': 'Fetching file tree',
+        'filter': 'Filtering files',
+        'insert_folders': 'Creating folder structure',
+        'summarize_files': 'Summarizing files',
+        'summarize_folders': 'Summarizing folders'
+    };
 
     function updateTimer() {
         if (!startTime) return;
-        
+
         const now = new Date();
         const diff = Math.floor((now - startTime) / 1000);
-        
+
         const minutes = Math.floor(diff / 60);
         const seconds = diff % 60;
-        
+
         document.getElementById('timer').innerText = `Time elapsed: ${minutes}m ${seconds}s`;
     }
 
-    function startSSE() {
-        const eventSource = new EventSource(`/api/status/${owner}/${repo}/`);
-        
-        // Update timer every second
-        setInterval(updateTimer, 1000);
-        
+    function updateProgress(data) {
+        const progress = data.progress;
+        if (!progress) return;
+
+        const filesTotal = progress.files?.total || 0;
+        const filesCompleted = progress.files?.completed || 0;
+        const filesFailed = progress.files?.failed || 0;
+        const foldersTotal = progress.folders?.total || 0;
+        const foldersCompleted = progress.folders?.completed || 0;
+
+        // Calculate overall progress percentage
+        let percentage = 0;
+        if (filesTotal > 0) {
+            // Weight files more heavily since they take longer
+            const fileProgress = filesCompleted / filesTotal;
+            const folderProgress = foldersTotal > 0 ? foldersCompleted / foldersTotal : 0;
+            percentage = Math.round((fileProgress * 0.7 + folderProgress * 0.3) * 100);
+        }
+
+        // Update progress bar
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const progressCounts = document.getElementById('progress-counts');
+
+        progressBar.style.width = percentage + '%';
+        progressText.innerText = percentage + '%';
+
+        if (filesTotal > 0) {
+            progressCounts.innerText = `${filesCompleted}/${filesTotal} files`;
+        }
+
+        // Update stats
+        const statsContainer = document.getElementById('stats-container');
+        if (filesCompleted > 0 || foldersCompleted > 0) {
+            statsContainer.classList.remove('hidden');
+            document.getElementById('files-completed').innerText = filesCompleted;
+            document.getElementById('folders-completed').innerText = foldersCompleted;
+        }
+    }
+
+    function updateCurrentStep(step) {
+        const stepEl = document.getElementById('current-step');
+        const label = stepLabels[step] || step;
+        if (label) {
+            stepEl.innerText = label + '...';
+            stepEl.classList.remove('hidden');
+        }
+    }
+
+    function connectSSE() {
+        if (eventSource) {
+            eventSource.close();
+        }
+
+        eventSource = new EventSource(`/api/status/${owner}/${repo}/`);
+
         eventSource.onmessage = function(event) {
+            reconnectAttempts = 0; // Reset on successful message
             const data = JSON.parse(event.data);
+
             if (data.status === 'complete') {
                 eventSource.close();
                 window.location.reload();
@@ -59,29 +162,63 @@
                 document.getElementById('status-message').innerText = "Error: " + (data.message || "Unknown error");
                 document.getElementById('status-message').classList.add('text-red-500');
             } else if (data.status === 'processing') {
+                // Update status message
                 if (data.message) {
                     document.getElementById('status-message').innerText = data.message;
                 }
+
+                // Update start time
                 if (data.start_time && !startTime) {
                     startTime = new Date(data.start_time);
                 }
-                
+
+                // Update current step
+                if (data.current_step) {
+                    updateCurrentStep(data.current_step);
+                }
+
+                // Update progress
+                if (data.progress) {
+                    updateProgress(data);
+                }
+
+                // Show resume indicator
+                if (data.resuming) {
+                    document.getElementById('resume-indicator').classList.remove('hidden');
+                }
+
+                // Update queue position
                 const queueEl = document.getElementById('queue-pos');
                 if (data.queue_pos) {
                     queueEl.innerText = `Position in queue: ${data.queue_pos}`;
-                    queueEl.style.display = 'block';
+                    queueEl.classList.remove('hidden');
                 } else {
-                    queueEl.style.display = 'none';
+                    queueEl.classList.add('hidden');
                 }
             }
         };
-        
+
         eventSource.onerror = function(err) {
             console.error("EventSource failed:", err);
+            eventSource.close();
+
+            // Attempt reconnection
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
+                setTimeout(connectSSE, delay);
+            } else {
+                document.getElementById('status-message').innerText = "Connection lost. Please refresh the page.";
+                document.getElementById('status-message').classList.add('text-red-500');
+            }
         };
     }
 
-    // Start SSE
-    startSSE();
+    // Update timer every second
+    setInterval(updateTimer, 1000);
+
+    // Start SSE connection
+    connectSSE();
 </script>
 {% endblock %}

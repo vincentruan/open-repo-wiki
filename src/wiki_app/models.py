@@ -22,6 +22,22 @@ class Repository(models.Model):
     process_start_at = models.DateTimeField(auto_now_add=True, null=True)
     queued_at = models.DateTimeField(auto_now_add=True, null=True)
 
+    # Processing state for checkpoint/resume
+    PROCESSING_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('in_progress', 'In Progress'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('paused', 'Paused'),
+    ]
+    processing_status = models.CharField(
+        max_length=20,
+        choices=PROCESSING_STATUS_CHOICES,
+        default='pending',
+        db_index=True
+    )
+    processing_state = models.JSONField(null=True, blank=True, default=dict)
+
     class Meta:
         db_table = 'repository'
 

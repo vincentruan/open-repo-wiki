@@ -184,7 +184,7 @@ class GitRepoProvider:
 
         return "Unknown"
     
-    async def get_tree(self, owner: str, repo: str, sha: str) -> RepoTreeResult:
+    async def get_tree(self, owner: str, repo: str, commit_sha: str) -> RepoTreeResult:
         """Get file tree from cloned repository."""
         self._ensure_cloned()
 
@@ -257,7 +257,10 @@ class GitRepoProvider:
         
         return False
     
-    async def get_file_content(self, owner: str, repo: str, path: str) -> str:
+    async def get_file_content(
+        self, owner: str, repo: str, sha: str, path: str,
+        session: Optional[any] = None
+    ) -> str:
         """Read file content from cloned repository."""
         self._ensure_cloned()
 
